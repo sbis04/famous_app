@@ -1,0 +1,78 @@
+name: Ghost Maintainer - Implement
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'GitHub issue number'
+        required: true
+        type: number
+      type:
+        description: 'bug or feature'
+        required: false
+        type: string
+        default: 'feature'
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: write
+
+jobs:
+  ghost-implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        working-directory: notion_setup
+        run: dart pub get
+
+      - name: Fetch issue details
+        id: issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_JSON=$(gh api repos/${{ github.repository }}/issues/${{ inputs.issue_number }})
+          echo "title=$(echo "$ISSUE_JSON" | jq -r '.title')" >> $GITHUB_OUTPUT
+          echo "body<<GHEOF" >> $GITHUB_OUTPUT
+          echo "$ISSUE_JSON" | jq -r '.body // ""' >> $GITHUB_OUTPUT
+          echo "GHEOF" >> $GITHUB_OUTPUT
+
+      - name: Set database ID
+        id: db
+        run: |
+          if [ "${{ inputs.type }}" = "bug" ]; then
+            echo "id=${{ secrets.NOTION_DATABASE_ID }}" >> $GITHUB_OUTPUT
+          else
+            echo "id=${{ secrets.NOTION_FEATURE_DB_ID }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "Step 1: Investigate and propose changes"
+        working-directory: notion_setup
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ steps.db.outputs.id }}
+          NOTION_VISION_PAGE_ID: ${{ secrets.NOTION_VISION_PAGE_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ISSUE_TITLE: ${{ steps.issue.outputs.title }}
+          ISSUE_BODY: ${{ steps.issue.outputs.body }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: dart run bin/auto_investigate.dart
+
+      - name: "Step 2: Create branch and PR"
+        working-directory: notion_setup
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ steps.db.outputs.id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_TITLE: ${{ steps.issue.outputs.title }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          TARGET_REPO: ${{ github.repository }}
+        run: dart run bin/auto_deploy.dart
