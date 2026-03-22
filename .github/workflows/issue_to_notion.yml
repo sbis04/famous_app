@@ -1,0 +1,87 @@
+name: Issue to Notion
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: write
+
+jobs:
+  ghost-maintainer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        working-directory: notion_setup
+        run: dart pub get
+
+      - name: Read config
+        id: config
+        run: |
+          if [ -f .ghost_maintainer.json ]; then
+            AUTO_FIX=$(cat .ghost_maintainer.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('auto_fix_bugs', True))" 2>/dev/null || echo "True")
+            echo "auto_fix_bugs=$AUTO_FIX" >> $GITHUB_OUTPUT
+          else
+            echo "auto_fix_bugs=True" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "Step 1: Ingest issue to Triage Queue"
+        working-directory: notion_setup
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_TRIAGE_DB_ID: ${{ secrets.NOTION_TRIAGE_DB_ID }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: dart run bin/issue_ingestion.dart
+
+      - name: "Step 2: Auto-triage and route"
+        id: triage
+        working-directory: notion_setup
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_TRIAGE_DB_ID: ${{ secrets.NOTION_TRIAGE_DB_ID }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          NOTION_FEATURE_DB_ID: ${{ secrets.NOTION_FEATURE_DB_ID }}
+          NOTION_VISION_PAGE_ID: ${{ secrets.NOTION_VISION_PAGE_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: dart run bin/auto_triage.dart
+
+      - name: "Step 3: Investigate bug and propose fix"
+        if: steps.triage.outputs.issue_type == 'bug' && steps.config.outputs.auto_fix_bugs == 'True'
+        working-directory: notion_setup
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          NOTION_VISION_PAGE_ID: ${{ secrets.NOTION_VISION_PAGE_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: dart run bin/auto_investigate.dart
+
+      - name: "Step 4: Create branch and PR for bug fix"
+        if: steps.triage.outputs.issue_type == 'bug' && steps.config.outputs.auto_fix_bugs == 'True'
+        working-directory: notion_setup
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          TARGET_REPO: ${{ github.repository }}
+        run: dart run bin/auto_deploy.dart
