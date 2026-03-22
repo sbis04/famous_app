@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 
 void main() {
   runApp(const MyApp());
@@ -28,7 +29,7 @@ class MyApp extends StatelessWidget {
         //
         // This works for code too, not just values: Most code changes can be
         // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
       home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
@@ -55,6 +56,22 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   int _counter = 0;
+  late SharedPreferences _prefs; // Declare SharedPreferences instance
+  static const String _counterKey = 'counter'; // Key for storing the counter
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCounter(); // Load counter when the state is initialized
+  }
+
+  // Asynchronously loads the counter value from SharedPreferences
+  void _loadCounter() async {
+    _prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _counter = _prefs.getInt(_counterKey) ?? 0; // Get the stored value, or 0 if not found
+    });
+  }
 
   void _incrementCounter() {
     setState(() {
@@ -64,6 +81,7 @@ class _MyHomePageState extends State<MyHomePage> {
       // _counter without calling setState(), then the build method would not be
       // called again, and so nothing would appear to happen.
       _counter++;
+      _prefs.setInt(_counterKey, _counter); // Save the new counter value
     });
   }
 
@@ -102,7 +120,7 @@ class _MyHomePageState extends State<MyHomePage> {
           // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
           // action in the IDE, or press "p" in the console), to see the
           // wireframe for each widget.
-          mainAxisAlignment: .center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text('You have pushed the button this many times:'),
             Text(
